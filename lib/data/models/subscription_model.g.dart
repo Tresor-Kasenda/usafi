@@ -8,7 +8,6 @@ part of 'subscription_model.dart';
 
 SubscriptionModel _$SubscriptionModelFromJson(Map<String, dynamic> json) =>
     SubscriptionModel(
-      id: json['id'] as String,
       userId: json['userId'] as String,
       isActive: json['isActive'] as bool,
       subscriptionType: SubscriptionModel._subscriptionTypeFromJson(
@@ -24,7 +23,6 @@ SubscriptionModel _$SubscriptionModelFromJson(Map<String, dynamic> json) =>
 
 Map<String, dynamic> _$SubscriptionModelToJson(SubscriptionModel instance) =>
     <String, dynamic>{
-      'id': instance.id,
       'userId': instance.userId,
       'isActive': instance.isActive,
       'subscriptionType': SubscriptionModel._subscriptionTypeToJson(

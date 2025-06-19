@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/repositories/subscription_repository.dart';
 import '../../data/models/subscription_model.dart';
@@ -18,6 +19,7 @@ class _AbonnementState extends State<Abonnement> {
   bool _isSubscribed = false;
   SubscriptionType? _typeAbonnement;
   SubscriptionModel? _currentSubscription;
+  int _remainingDays = 0;
 
   @override
   void initState() {
@@ -32,19 +34,33 @@ class _AbonnementState extends State<Abonnement> {
       final user = supabase.auth.currentUser;
       if (user != null) {
         try {
-          final subscription = await _subscriptionRepository.getSubscription(
+          // Connexion directe avec le repository pour obtenir tous les détails de l'abonnement
+          final status = await _subscriptionRepository.getSubscriptionStatus(
             user.id,
           );
-          setState(() {
-            _currentSubscription = subscription;
-            _isSubscribed = subscription.isValid;
-            _typeAbonnement = subscription.subscriptionType;
-          });
+
+          if (status['hasActiveSubscription']) {
+            setState(() {
+              _currentSubscription =
+                  status['subscription'] as SubscriptionModel;
+              _isSubscribed = true;
+              _typeAbonnement = _currentSubscription!.subscriptionType;
+              _remainingDays = status['remainingDays'] as int;
+            });
+          } else {
+            setState(() {
+              _currentSubscription = null;
+              _isSubscribed = false;
+              _typeAbonnement = null;
+              _remainingDays = 0;
+            });
+          }
         } catch (e) {
           setState(() {
             _currentSubscription = null;
             _isSubscribed = false;
             _typeAbonnement = null;
+            _remainingDays = 0;
           });
         }
       }
@@ -80,12 +96,14 @@ class _AbonnementState extends State<Abonnement> {
     setState(() => _isLoading = true);
     try {
       if (_isSubscribed) {
+        // Connexion directe avec le repository pour annuler l'abonnement
         await _subscriptionRepository.cancelSubscription(user.id);
       } else {
         if (_typeAbonnement == null) {
           throw Exception("Type d'abonnement non sélectionné");
         }
-        await _subscriptionRepository.createSubscription(
+        // Connexion directe avec le repository pour créer l'abonnement
+        _currentSubscription = await _subscriptionRepository.createSubscription(
           userId: user.id,
           subscriptionType: _typeAbonnement!,
         );
@@ -153,19 +171,93 @@ class _AbonnementState extends State<Abonnement> {
                       ),
                   ] else ...[
                     Card(
+                      elevation: 4,
+                      margin: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 4,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
                       child: Padding(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(20),
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(
-                              'Abonnement actif : ${_currentSubscription?.subscriptionType.displayName}',
-                              style: Theme.of(context).textTheme.titleLarge,
+                            Icon(
+                              Icons.verified,
+                              color: Theme.of(context).colorScheme.primary,
+                              size: 48,
                             ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Abonnement ${_currentSubscription?.subscriptionType.displayName} Actif',
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
+                            const Divider(height: 30),
                             if (_currentSubscription?.expiresAt != null) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                'Expire le : ${_formatDate(_currentSubscription!.expiresAt!)}',
-                                style: Theme.of(context).textTheme.bodyLarge,
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Date d\'expiration:',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyLarge,
+                                  ),
+                                  Text(
+                                    _formatDate(
+                                      _currentSubscription!.expiresAt!,
+                                    ),
+                                    style: Theme.of(context).textTheme.bodyLarge
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Temps restant:',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyLarge,
+                                  ),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        '$_remainingDays ${_remainingDays > 1 ? "jours" : "jour"}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyLarge
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: _remainingDays < 3
+                                                  ? Colors.red
+                                                  : Colors.green,
+                                            ),
+                                      ),
+                                      if (_remainingDays < 3)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 4),
+                                          child: Icon(
+                                            Icons.warning,
+                                            color: Colors.red,
+                                            size: 18,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ],
                           ],
@@ -241,6 +333,7 @@ class _AbonnementState extends State<Abonnement> {
   }
 
   String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
+    final DateFormat formatter = DateFormat('dd/MM/yyyy');
+    return formatter.format(date);
   }
 }
