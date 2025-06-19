@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,12 +9,7 @@ import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:html' as html;
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as img;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 
@@ -714,13 +708,9 @@ class _CommandesPageState extends State<CommandesPage> {
           .from('utilisateurs')
           .select();
 
-      if (response is List) {
-        utilisateurs = response
-            .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
-            .toList();
-      } else {
-        utilisateurs = [];
-      }
+      utilisateurs = response
+          .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+          .toList();
     } catch (e) {
       logger.e("Erreur lors du fetch des utilisateurs: $e");
       utilisateurs = [];
@@ -737,17 +727,13 @@ class _CommandesPageState extends State<CommandesPage> {
           .select()
           .order('created_at', ascending: false);
 
-      if (response is List) {
-        _collectes = response.map<Map<String, dynamic>>((e) {
-          final map = Map<String, dynamic>.from(e);
-          if (!map.containsKey('status') || map['status'] == null) {
-            map['status'] = 'En cours';
-          }
-          return map;
-        }).toList();
-      } else {
-        _collectes = [];
-      }
+      _collectes = response.map<Map<String, dynamic>>((e) {
+        final map = Map<String, dynamic>.from(e);
+        if (!map.containsKey('status') || map['status'] == null) {
+          map['status'] = 'En cours';
+        }
+        return map;
+      }).toList();
     } catch (e) {
       logger.e("Erreur lors du fetch des collectes: $e");
       _collectes = [];

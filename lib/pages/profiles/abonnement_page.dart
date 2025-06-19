@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../data/repositories/subscription_repository.dart';
+import '../../data/models/subscription_model.dart';
 
 class Abonnement extends StatefulWidget {
   const Abonnement({super.key});
@@ -10,15 +12,17 @@ class Abonnement extends StatefulWidget {
 
 class _AbonnementState extends State<Abonnement> {
   final SupabaseClient supabase = Supabase.instance.client;
+  late final SubscriptionRepository _subscriptionRepository;
 
   bool _isLoading = true;
   bool _isSubscribed = false;
-  String? _typeAbonnement;
-  String? _currentSubscriptionType;
+  SubscriptionType? _typeAbonnement;
+  SubscriptionModel? _currentSubscription;
 
   @override
   void initState() {
     super.initState();
+    _subscriptionRepository = SubscriptionRepository(supabase);
     _checkSubscriptionStatus();
   }
 
@@ -27,17 +31,22 @@ class _AbonnementState extends State<Abonnement> {
     try {
       final user = supabase.auth.currentUser;
       if (user != null) {
-        final response = await supabase
-            .from('collecte')
-            .select('type_abonnement, abonnement_actif')
-            .eq('user_id', user.id)
-            .single();
-
-        setState(() {
-          _isSubscribed = response['abonnement_actif'] ?? false;
-          _currentSubscriptionType = response['type_abonnement'];
-          _typeAbonnement = _currentSubscriptionType;
-        });
+        try {
+          final subscription = await _subscriptionRepository.getSubscription(
+            user.id,
+          );
+          setState(() {
+            _currentSubscription = subscription;
+            _isSubscribed = subscription.isValid;
+            _typeAbonnement = subscription.subscriptionType;
+          });
+        } catch (e) {
+          setState(() {
+            _currentSubscription = null;
+            _isSubscribed = false;
+            _typeAbonnement = null;
+          });
+        }
       }
     } catch (e) {
       debugPrint('Erreur lors de la vérification de l\'abonnement: $e');
@@ -68,12 +77,19 @@ class _AbonnementState extends State<Abonnement> {
       return;
     }
 
+    setState(() => _isLoading = true);
     try {
-      await supabase.from('collecte').upsert({
-        'user_id': user.id,
-        'type_abonnement': _typeAbonnement,
-        'abonnement_actif': !_isSubscribed,
-      });
+      if (_isSubscribed) {
+        await _subscriptionRepository.cancelSubscription(user.id);
+      } else {
+        if (_typeAbonnement == null) {
+          throw Exception("Type d'abonnement non sélectionné");
+        }
+        await _subscriptionRepository.createSubscription(
+          userId: user.id,
+          subscriptionType: _typeAbonnement!,
+        );
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -88,338 +104,143 @@ class _AbonnementState extends State<Abonnement> {
 
       await _checkSubscriptionStatus();
     } catch (e) {
+      debugPrint('Erreur lors de l\'opération d\'abonnement: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Erreur lors de l'opération : $e"),
+          content: Text(
+            "Une erreur est survenue lors de l'opération. Veuillez réessayer.",
+          ),
           backgroundColor: Colors.red,
         ),
       );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Gestion de l\'abonnement',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: const Color(0xFF66BB6A),
-        elevation: 0,
+        title: const Text('Abonnement'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF66BB6A)),
-              ),
-            )
-          : Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    const Color(0xFF66BB6A).withOpacity(0.1),
-                    Colors.white,
-                  ],
-                ),
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Status Card
-                    _buildStatusCard(theme),
-                    const SizedBox(height: 32),
-
-                    // Subscription Options
-                    if (!_isSubscribed) ...[
-                      Text(
-                        'Choisissez votre forfait',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[800],
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Sélectionnez l\'option qui vous convient le mieux',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      _buildSubscriptionOption('Mensuel', '9.99€', 'par mois', [
-                        'Accès illimité à toutes les fonctionnalités',
-                        'Support premium 24/7',
-                        'Mises à jour prioritaires',
-                      ]),
-                      const SizedBox(height: 16),
-                      _buildSubscriptionOption('Annuel', '99.99€', 'par an', [
-                        'Tout le forfait mensuel',
-                        'Deux mois gratuits',
-                        'Fonctionnalités exclusives',
-                      ], isPopular: true),
-                    ],
-
-                    // Action Button
-                    const SizedBox(height: 32),
-                    _buildActionButton(),
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _buildStatusCard(ThemeData theme) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _isSubscribed
-                  ? const Color(0xFF66BB6A).withOpacity(0.1)
-                  : Colors.grey.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              _isSubscribed ? Icons.check_circle : Icons.access_time,
-              size: 48,
-              color: _isSubscribed ? const Color(0xFF66BB6A) : Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _isSubscribed ? 'Abonnement actif' : 'Aucun abonnement actif',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: _isSubscribed ? const Color(0xFF66BB6A) : Colors.grey[700],
-            ),
-          ),
-          if (_isSubscribed) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF66BB6A).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                _currentSubscriptionType ?? '',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFF66BB6A),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSubscriptionOption(
-    String title,
-    String price,
-    String period,
-    List<String> features, {
-    bool isPopular = false,
-  }) {
-    final bool isSelected = _typeAbonnement == title;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isSelected
-              ? const Color(0xFF66BB6A)
-              : Colors.grey.withOpacity(0.2),
-          width: isSelected ? 2 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: () => setState(() => _typeAbonnement = title),
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (isPopular)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF66BB6A).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.star, size: 16, color: Color(0xFF66BB6A)),
-                        SizedBox(width: 4),
-                        Text(
-                          'Plus populaire',
-                          style: TextStyle(
-                            color: Color(0xFF66BB6A),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Choisissez votre type d\'abonnement',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
                   ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                  const SizedBox(height: 20),
+                  if (!_isSubscribed) ...[
+                    for (final type in SubscriptionType.values)
+                      _buildSubscriptionCard(
+                        title: type.displayName,
+                        prix: type == SubscriptionType.daily
+                            ? '2€/jour'
+                            : '30€/mois',
+                        description: type == SubscriptionType.daily
+                            ? 'Accès aux notifications pendant 24h'
+                            : 'Accès aux notifications pendant 30 jours',
+                        isSelected: _typeAbonnement == type,
+                        onSelect: () => setState(() => _typeAbonnement = type),
                       ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          price,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: const Color(0xFF66BB6A),
+                  ] else ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            Text(
+                              'Abonnement actif : ${_currentSubscription?.subscriptionType.displayName}',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            if (_currentSubscription?.expiresAt != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Expire le : ${_formatDate(_currentSubscription!.expiresAt!)}',
+                                style: Theme.of(context).textTheme.bodyLarge,
                               ),
+                            ],
+                          ],
                         ),
-                        Text(period, style: TextStyle(color: Colors.grey[600])),
-                      ],
+                      ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                ...features.map(
-                  (feature) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.check_circle_outline,
-                          color: Color(0xFF66BB6A),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            feature,
-                            style: TextStyle(color: Colors.grey[700]),
-                          ),
-                        ),
-                      ],
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: _toggleSubscription,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isSubscribed
+                          ? Colors.red
+                          : Colors.green,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Text(
+                      _isSubscribed ? 'Se désabonner' : 'S\'abonner',
+                      style: const TextStyle(fontSize: 18),
                     ),
                   ),
-                ),
-                if (isSelected)
-                  Container(
-                    margin: const EdgeInsets.only(top: 16),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF66BB6A).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          color: Color(0xFF66BB6A),
-                          size: 16,
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          'Sélectionné',
-                          style: TextStyle(
-                            color: Color(0xFF66BB6A),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+                ],
+              ),
             ),
+    );
+  }
+
+  Widget _buildSubscriptionCard({
+    required String title,
+    required String prix,
+    required String description,
+    required bool isSelected,
+    required VoidCallback onSelect,
+  }) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: isSelected ? 8 : 1,
+      child: InkWell(
+        onTap: onSelect,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: isSelected
+                ? Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 2,
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    prix,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(description, style: Theme.of(context).textTheme.bodyLarge),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActionButton() {
-    return SizedBox(
-      height: 56,
-      child: ElevatedButton(
-        onPressed: _toggleSubscription,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isSubscribed
-              ? Colors.red[400]
-              : const Color(0xFF66BB6A),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          elevation: 2,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              _isSubscribed
-                  ? Icons.cancel_outlined
-                  : Icons.check_circle_outline,
-              size: 24,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _isSubscribed ? 'Se désabonner' : 'Confirmer l\'abonnement',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    );
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 }
