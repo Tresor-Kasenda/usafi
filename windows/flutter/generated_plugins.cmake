@@ -4,9 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  cloud_firestore
   file_selector_windows
-  firebase_core
   geolocator_windows
   url_launcher_windows
 )
